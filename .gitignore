@@ -1,5 +1,8 @@
 ﻿venv/
+.venv*/
+__pycache__/
 
 cache
 client.session
 client.session-journal
+telegram-login-qr-*.png

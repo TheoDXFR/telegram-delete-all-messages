@@ -1,6 +1,8 @@
 import asyncio
 import os
+import subprocess
 import sys
+import time
 from base64 import urlsafe_b64encode
 
 from pyrogram import Client, raw, utils
@@ -9,7 +11,8 @@ from pyrogram.handlers import RawUpdateHandler
 from pyrogram.session import Auth, Session
 from qrcode import QRCode
 
-QR_REFRESH_SECONDS = 25
+QR_REFRESH_SECONDS = 15
+QR_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
 
 def _clear_screen() -> None:
@@ -28,6 +31,19 @@ def _print_qr(token: bytes) -> None:
 
     qr = QRCode(border=1)
     qr.add_data(login_url)
+    qr.make(fit=True)
+    qr_path = os.path.join(QR_DIRECTORY, f"telegram-login-qr-{time.time_ns()}.png")
+    qr.make_image(fill_color="black", back_color="white").save(qr_path)
+    os.chmod(qr_path, 0o600)
+    for old in sorted((name for name in os.listdir(QR_DIRECTORY)
+                       if name.startswith("telegram-login-qr-") and name.endswith(".png")))[:-2]:
+        try:
+            os.unlink(os.path.join(QR_DIRECTORY, old))
+        except OSError:
+            pass
+    subprocess.run(["/usr/bin/osascript", "-e", 'tell application "Preview" to close every window'], capture_output=True, check=False)
+    subprocess.run(["/usr/bin/open", "-a", "Preview", qr_path], check=False)
+    print(f"PNG QR: {qr_path}")
     try:
         qr.print_ascii(invert=True)
     except (UnicodeEncodeError, UnicodeDecodeError):
@@ -86,7 +102,16 @@ async def _complete_login(client: Client, result) -> bool:
 
 async def _prompt_2fa(client: Client) -> None:
     while True:
-        password = await utils.ainput("Two-step verification password: ", hide=True)
+        if sys.platform == "darwin":
+            result = subprocess.run([
+                "/usr/bin/osascript", "-e",
+                'text returned of (display dialog "Mot de passe Telegram 2FA" default answer "" with hidden answer buttons {"Annuler", "Continuer"} default button "Continuer")',
+            ], capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError("Telegram 2FA cancelled")
+            password = result.stdout.strip()
+        else:
+            password = await utils.ainput("Two-step verification password: ", hide=True)
         try:
             await client.check_password(password)
         except PasswordHashInvalid:
@@ -121,7 +146,11 @@ async def login_with_qr(client: Client) -> None:
                 await _prompt_2fa(client)
                 break
 
-            if await _complete_login(client, result):
+            try:
+                if await _complete_login(client, result):
+                    break
+            except SessionPasswordNeeded:
+                await _prompt_2fa(client)
                 break
 
             if not isinstance(result, raw.types.auth.LoginToken):
