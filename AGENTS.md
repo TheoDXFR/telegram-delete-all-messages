@@ -9,9 +9,15 @@ Cette politique s'applique à tous les dépôts canoniques sous `/Users/td/Dev`.
 - Le contenu du checkout local canonique est la base de travail. `HEAD` et `origin/*` servent à comparer et publier, jamais à effacer automatiquement un état local.
 - Un arbre `dirty` n'est pas une erreur. Ne jamais utiliser `stash`, `restore`, `reset`, `checkout -- <fichier>` ou `clean` pour obtenir artificiellement un arbre propre ou contourner un conflit de session.
 - Avant d'éditer, raisonner par chemin, pas par statut global. Lire le fichier courant et son diff éventuel.
-- Fichier dirty modifié par une autre session il y a moins de 2 h : conflit actif présumé, lecture seule. Exception : le fichier appartient déjà explicitement à la tâche/session courante.
-- Fichier dirty sans activité depuis au moins 2 h : il peut être repris. Conserver les octets locaux présents comme base, relire le diff existant, puis ajouter le changement demandé sans revenir à `HEAD`.
-- Si le fichier change à nouveau après le préflight ou pendant l'édition, considérer qu'une autre session l'a repris : arrêter l'écriture sur ce chemin et réconcilier avant de continuer.
+- Le délai de reprise dépend du type de fichier, car 2 h universelles bloquent inutilement les workflows courts :
+  - `PLAN_*.md` et `docs/plans/README.md` / `plans/README.md` : **30 min** sans activité ;
+  - fichier ordinaire : **60 min** sans activité ;
+  - fichier à fort rayon d'explosion : **90 min** sans activité. Cette classe couvre au minimum `AGENTS.md`, `policies/dev-workspace.md`, les lockfiles partagés, les manifests/configs structurants listés par `scripts/dev_workspace_lease.py`, les workflows CI et les plists.
+- Un délai expiré signifie seulement **« reprise autorisée après préflight »**, jamais « tâche terminée » ni « contenu abandonné ». Conserver les octets locaux présents comme base, relire le diff existant, puis ajouter le changement demandé sans revenir à `HEAD`.
+- Exception : le fichier appartient déjà explicitement à la tâche/session courante. Cette propriété doit rester explicite et ne permet pas d'ignorer une modification concurrente observée après le préflight.
+- Pour un plan activement travaillé, utiliser de préférence un lease borné : `python3 scripts/dev_workspace_lease.py acquire --path <PLAN> --session-id <id>`. Renouveler environ toutes les 5 min avec `heartbeat`; le lease expire après 20 min par défaut. À la fin, `release`. Un lease actif d'une autre session interdit l'écriture. Un lease expiré ne se réactive jamais par simple heartbeat : il faut réacquérir.
+- Sans lease actif, le `mtime` et le seuil de catégorie restent le fallback. Un agent qui démarre une reprise doit relire le fichier et son diff avant d'écrire.
+- Si le fichier change à nouveau après le préflight ou pendant l'édition, même après expiration du délai ou avec un lease précédemment valide, considérer qu'une autre session l'a repris : arrêter l'écriture sur ce chemin et réconcilier avant de continuer.
 - L'heure de modification est un signal de concurrence, pas une preuve que le contenu est sémantiquement meilleur. Ne jamais écraser automatiquement un fichier seulement parce qu'un autre exemplaire a un mtime plus récent.
 
 ## Git
